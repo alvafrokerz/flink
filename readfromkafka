@@ -1,0 +1,79 @@
+package com.prudential.simple;
+
+
+import com.couchbase.client.java.document.JsonDocument;
+import com.couchbase.client.java.document.json.JsonObject;
+import com.kudjang.flink.streaming.connectors.couchbase.CouchbaseOutputFormat;
+import com.kudjang.flink.streaming.connectors.couchbase.CouchbaseSinkFunction;
+import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.api.common.serialization.SimpleStringSchema;
+import org.apache.flink.api.java.utils.ParameterTool;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer011;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Properties;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+
+public class ReadFromKafka {
+
+	private static Logger LOG = LoggerFactory.getLogger(ReadFromKafka.class);
+
+	public static void main(String[] args) throws Exception {
+		// create execution environment
+		Long startTime = System.nanoTime();
+		LOG.info("Application Start At {}", startTime);
+
+		final ParameterTool params = ParameterTool.fromArgs(args);
+
+
+		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+		Properties properties = new Properties();
+		properties.setProperty("bootstrap.servers", "localhost:9092");
+		properties.setProperty("group.id", "flink_consumer");
+		String topic = params.has("topic") ? params.get("topic") : "CMODDTA_CU_DEV";
+		String groupId = params.has("group.id") ? params.get("group.id") : "test-consumer-group";
+		//couchbase
+		String clusterUri = params.has("clusterUri") ? params.get("clusterUri").replaceAll("\\s+","") : "http://10.170.49.100:8091"; // comma-separated list of server dns names or IPs
+		String user = params.has("user") ? params.get("user") : "Administrator";
+		String password = params.has("password") ? params.get("password") : "Administrator";
+		String bucketName = params.has("bucketName") ? params.get("bucketName") : "CMODDTA_CU_DEV";
+
+
+        CouchbaseOutputFormat format = CouchbaseOutputFormat.buildCouchbaseOutputFormat()
+                .setPassword(password)
+                .setUsername(user)
+                .setBucketName(bucketName)
+                .setClusterUri(clusterUri)
+				.finish();
+
+        CouchbaseSinkFunction sink = new CouchbaseSinkFunction(format);
+
+		DataStream<String> stream = env
+			.addSource(new FlinkKafkaConsumer011<>("flink-demo", new SimpleStringSchema(), properties));
+
+		stream.map(new MapFunction<String, JsonDocument>() {
+			private static final long serialVersionUID = -6867736771747690202L;
+
+			@Override
+			public JsonDocument map(String value) throws Exception {
+				JsonObject jsonObject = JsonObject.fromJson(value);
+				return JsonDocument.create(UUID.randomUUID().toString(), jsonObject);
+			}
+		}).addSink(sink);
+
+
+
+
+
+		env.execute();
+		Long endTime = System.nanoTime();
+		LOG.info("Execution Time is {} seconds", TimeUnit.NANOSECONDS.toSeconds(endTime - startTime));
+	}
+
+
+}
